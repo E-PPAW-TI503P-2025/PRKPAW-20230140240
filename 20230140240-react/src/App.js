@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 
 function App() {
   const [message, setMessage] = useState('');
-
+// fetch api 
   useEffect(() => {
     fetch('http://localhost:5000') // request ke server Node.js
       .then(response => response.json())
