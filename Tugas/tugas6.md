@@ -5,7 +5,7 @@
 ## 2. Endpoint: `auth/register/admin` 
 ![Register_Admin](ss/ss6/registerAdmin.png)
 
-## 3. Endpoint: `auth/login`
+## 3. Endpoint: `auth/login/mahasiswa`
 ![Login_Mahasiswa](ss/ss6/loginMahasiswa.png)
 
 ## 4. Endpoint: `database`
