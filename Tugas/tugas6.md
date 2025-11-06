@@ -1,8 +1,8 @@
 # Tugas 6
-## 1. Endpoint: `auth/register`
+## 1. Endpoint: `auth/register/mahasiswa`
 ![Register_Mahasiswa](ss/ss6/registerMahasiswa.png)
 
-## 2. Endpoint: `auth/register` 
+## 2. Endpoint: `auth/register/admin` 
 ![Register_Admin](ss/ss6/registerAdmin.png)
 
 ## 3. Endpoint: `auth/login`
