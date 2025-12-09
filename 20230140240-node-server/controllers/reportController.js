@@ -1,24 +1,27 @@
-const { Presensi, User } = require("../models"); // <-- Import User
+const { Presensi, User } = require("../models");
 const { Op } = require("sequelize");
 
 exports.getDailyReport = async (req, res) => {
+  console.log("✅ CONTROLLER BARU KEPAKAI (getDailyReport)");
+
   try {
     const { nama, tanggalMulai, tanggalSelesai } = req.query;
-    const options = { 
-        where: {},
-        // Tambahkan JOIN (include) ke tabel User
-        include: [{ 
-            model: User, 
-            as: 'user', 
-            attributes: ['nama'] // Hanya ambil kolom nama dari User
-        }]
+
+    const options = {
+      where: {},
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["nama"],
+        },
+      ],
     };
 
     if (nama) {
-        // Filter nama melalui kondisi di model User yang direlasikan
-        options.include[0].where = { 
-            nama: { [Op.like]: `%${nama}%` }
-        };
+      options.include[0].where = {
+        nama: { [Op.like]: `%${nama}%` },
+      };
     }
 
     if (tanggalMulai && tanggalSelesai) {
@@ -26,29 +29,29 @@ exports.getDailyReport = async (req, res) => {
         [Op.between]: [tanggalMulai, tanggalSelesai],
       };
     }
-    
-    // Fetch data with relations
+
     const records = await Presensi.findAll(options);
-    
-    // Map the result to include the user's name directly in the report structure
-    const formattedRecords = records.map(record => ({
-        id: record.id,
-        userId: record.userId,
-        nama: record.user.nama, // <-- Ambil nama dari relasi User
-        checkIn: record.checkIn,
-        checkOut: record.checkOut,
-        latitude: record.latitude, 
-        longitude: record.longitude, 
+
+    const formattedRecords = records.map((record) => ({
+      id: record.id,
+      userId: record.userId,
+      nama: record.user.nama,
+      checkIn: record.checkIn,
+      checkOut: record.checkOut,
+      latitude: record.latitude,
+      longitude: record.longitude,
+      buktiFoto: record.buktiFoto,
     }));
 
     res.json({
       reportDate: new Date().toLocaleDateString(),
       filter: { nama, tanggalMulai, tanggalSelesai },
-      data: formattedRecords, // Gunakan data yang telah diformat
+      data: formattedRecords,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Gagal mengambil laporan", error: error.message });
+    res.status(500).json({
+      message: "Gagal mengambil laporan",
+      error: error.message,
+    });
   }
 };

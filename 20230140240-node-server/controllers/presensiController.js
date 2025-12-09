@@ -1,18 +1,38 @@
- 	// 1. Ganti sumber data dari array ke model Sequelize
-const { Presensi } = require("../models");
+const { Presensi, User } = require("../models");
 const { format } = require("date-fns-tz");
 const { validationResult } = require("express-validator");
+const multer = require("multer");
+const path = require("path");
+
 const timeZone = "Asia/Jakarta";
- 	
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${req.user.id}-${Date.now()}${path.extname(file.originalname)}`);
+  },
+});
+
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/")) {
+    cb(null, true);
+  } else {
+    cb(new Error("Hanya file gambar yang diperbolehkan!"), false);
+  }
+};
+
+exports.upload = multer({ storage, fileFilter });
+
 exports.CheckIn = async (req, res) => {
-  // 2. Gunakan try...catch untuk error handling
   try {
     const { id: userId, nama: userName } = req.user;
-    const { latitude, longitude } = req.body; // <-- Ambil data lokasi baru
+    const { latitude, longitude } = req.body;
     const waktuSekarang = new Date();
 
-    // 3. Ubah cara mencari data menggunakan 'findOne' dari Sequelize
-    // Mencari record yang belum check-out untuk user yang sama
+    const buktiFoto = req.file ? req.file.path : null;
+
     const existingRecord = await Presensi.findOne({
       where: { userId: userId, checkOut: null },
     });
@@ -23,25 +43,23 @@ exports.CheckIn = async (req, res) => {
         .json({ message: "Anda sudah melakukan check-in hari ini." });
     }
 
-    // 4. Ubah cara membuat data baru menggunakan 'create' dari Sequelize
     const newRecord = await Presensi.create({
       userId: userId,
-      // Kolom 'nama' tidak lagi disimpan di tabel Presensi (diambil dari relasi User)
       checkIn: waktuSekarang,
-      latitude: latitude, // <-- Simpan data lokasi
-      longitude: longitude, // <-- Simpan data lokasi
+      latitude: latitude || null,
+      longitude: longitude || null,
+      buktiFoto: buktiFoto,
     });
-    
-    // Format data untuk respons
+
     const formattedData = {
-        id: newRecord.id,
-        userId: newRecord.userId,
-        // Nama bisa diambil dari req.user karena tidak ada di newRecord
-        nama: userName, 
-        checkIn: format(newRecord.checkIn, "yyyy-MM-dd HH:mm:ssXXX", { timeZone }),
-        checkOut: null,
-        latitude: newRecord.latitude, // Sertakan lokasi
-        longitude: newRecord.longitude, // Sertakan lokasi
+      id: newRecord.id,
+      userId: newRecord.userId,
+      nama: userName,
+      checkIn: format(newRecord.checkIn, "yyyy-MM-dd HH:mm:ssXXX", { timeZone }),
+      checkOut: null,
+      latitude: newRecord.latitude,
+      longitude: newRecord.longitude,
+      buktiFoto: newRecord.buktiFoto,
     };
 
     res.status(201).json({
@@ -53,17 +71,18 @@ exports.CheckIn = async (req, res) => {
       data: formattedData,
     });
   } catch (error) {
-    res.status(500).json({ message: "Terjadi kesalahan pada server", error: error.message });
+    res.status(500).json({
+      message: "Terjadi kesalahan pada server",
+      error: error.message,
+    });
   }
 };
- 	
+
 exports.CheckOut = async (req, res) => {
-  // Gunakan try...catch
   try {
     const { id: userId, nama: userName } = req.user;
     const waktuSekarang = new Date();
 
-    // Cari data di database yang belum check-out
     const recordToUpdate = await Presensi.findOne({
       where: { userId: userId, checkOut: null },
     });
@@ -74,18 +93,22 @@ exports.CheckOut = async (req, res) => {
       });
     }
 
-    // 5. Update dan simpan perubahan ke database
     recordToUpdate.checkOut = waktuSekarang;
     await recordToUpdate.save();
 
     const formattedData = {
-        id: recordToUpdate.id,
-        userId: recordToUpdate.userId,
-        nama: userName,
-        checkIn: format(recordToUpdate.checkIn, "yyyy-MM-dd HH:mm:ssXXX", { timeZone }),
-        checkOut: format(recordToUpdate.checkOut, "yyyy-MM-dd HH:mm:ssXXX", { timeZone }),
-        latitude: recordToUpdate.latitude, // Sertakan lokasi
-        longitude: recordToUpdate.longitude, // Sertakan lokasi
+      id: recordToUpdate.id,
+      userId: recordToUpdate.userId,
+      nama: userName,
+      checkIn: format(recordToUpdate.checkIn, "yyyy-MM-dd HH:mm:ssXXX", {
+        timeZone,
+      }),
+      checkOut: format(recordToUpdate.checkOut, "yyyy-MM-dd HH:mm:ssXXX", {
+        timeZone,
+      }),
+      latitude: recordToUpdate.latitude,
+      longitude: recordToUpdate.longitude,
+      buktiFoto: recordToUpdate.buktiFoto,
     };
 
     res.json({
@@ -97,10 +120,12 @@ exports.CheckOut = async (req, res) => {
       data: formattedData,
     });
   } catch (error) {
-    res.status(500).json({ message: "Terjadi kesalahan pada server", error: error.message });
+    res.status(500).json({
+      message: "Terjadi kesalahan pada server",
+      error: error.message,
+    });
   }
 };
-
 
 exports.deletePresensi = async (req, res) => {
   try {
@@ -127,11 +152,11 @@ exports.deletePresensi = async (req, res) => {
       message: "Catatan presensi berhasil dihapus.",
       deletedRecord: {
         id: presensiId,
-        // Nama tidak tersedia di record lagi, tetapi bisa diabaikan dalam respons delete
         checkIn: recordToDelete.checkIn,
         checkOut: recordToDelete.checkOut,
         latitude: recordToDelete.latitude,
         longitude: recordToDelete.longitude,
+        buktiFoto: recordToDelete.buktiFoto,
       },
     });
   } catch (error) {
@@ -142,28 +167,30 @@ exports.deletePresensi = async (req, res) => {
   }
 };
 
-
 exports.updatePresensi = async (req, res) => {
   try {
-    // Cek hasil validasi dari express-validator
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
     const presensiId = req.params.id;
-    // Tambahkan latitude dan longitude ke destructuring
-    const { checkIn, checkOut, nama, latitude, longitude } = req.body; 
+    const { checkIn, checkOut, latitude, longitude } = req.body;
+    const buktiFoto = req.file ? req.file.path : undefined;
 
-    // Perbarui validasi untuk memastikan setidaknya satu field yang valid dikirim (termasuk lat/lng)
-    if (checkIn === undefined && checkOut === undefined && nama === undefined && latitude === undefined && longitude === undefined) {
+    if (
+      checkIn === undefined &&
+      checkOut === undefined &&
+      latitude === undefined &&
+      longitude === undefined &&
+      buktiFoto === undefined
+    ) {
       return res.status(400).json({
         message:
-          "Request body tidak berisi data yang valid untuk diupdate (checkIn, checkOut, latitude, atau longitude).",
+          "Request body tidak berisi data yang valid untuk diupdate (checkIn, checkOut, latitude, longitude, atau buktiFoto).",
       });
     }
 
-    // Cari record berdasarkan ID
     const recordToUpdate = await Presensi.findByPk(presensiId);
     if (!recordToUpdate) {
       return res
@@ -171,13 +198,17 @@ exports.updatePresensi = async (req, res) => {
         .json({ message: "Catatan presensi tidak ditemukan." });
     }
 
-    // Update nilai yang dikirim
     recordToUpdate.checkIn = checkIn || recordToUpdate.checkIn;
     recordToUpdate.checkOut = checkOut || recordToUpdate.checkOut;
-    // recordToUpdate.nama = nama || recordToUpdate.nama; // Baris ini HARUS DIHAPUS karena kolom 'nama' sudah dihapus.
-    recordToUpdate.latitude = latitude || recordToUpdate.latitude; // Tambah
-    recordToUpdate.longitude = longitude || recordToUpdate.longitude; // Tambah
-    
+    recordToUpdate.latitude =
+      latitude !== undefined ? latitude : recordToUpdate.latitude;
+    recordToUpdate.longitude =
+      longitude !== undefined ? longitude : recordToUpdate.longitude;
+
+    if (buktiFoto !== undefined) {
+      recordToUpdate.buktiFoto = buktiFoto;
+    }
+
     await recordToUpdate.save();
 
     res.json({

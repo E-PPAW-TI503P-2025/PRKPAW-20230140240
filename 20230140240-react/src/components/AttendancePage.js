@@ -1,42 +1,44 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import Webcam from "react-webcam";
 import axios from "axios";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import L from "leaflet";
 import { useNavigate } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'; 
-import L from 'leaflet';
 
-// --- SKEMA WARNA LEMBUT BARU ---
 const COLORS = {
-  primary: "#6A5ACD",    // Slate Blue / Lavender gelap (untuk teks utama)
-  secondary: "#ADD8E6",  // Light Blue (untuk aksen/hover)
-  background: "#F0F8FF", // Alice Blue (background halaman)
-  card: "#FFFFFF",       // Putih bersih
-  checkIn: "#90EE90",    // Light Green (Check-In)
-  checkOut: "#FFB6C1",   // Light Pink (Check-Out)
-  disabled: "#E0E0E0",   // Gray sangat lembut
-  shadow: "rgba(106, 90, 205, 0.15)", // Shadow lembut dari warna primary
+  primary: "#6A5ACD",
+  secondary: "#ADD8E6",
+  background: "#F0F8FF",
+  card: "#FFFFFF",
+  checkIn: "#90EE90",
+  checkOut: "#FFB6C1",
+  shadow: "rgba(106, 90, 205, 0.15)",
 };
 
-// Fix for default Leaflet marker icon issue (common issue in bundlers)
 if (L.Icon) {
   delete L.Icon.Default.prototype._getIconUrl;
   L.Icon.Default.mergeOptions({
-    // Menggunakan CDN untuk menghindari require() di Canvas
-    iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
-    iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
-    shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+    iconUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png",
+    iconRetinaUrl:
+      "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png",
+    shadowUrl:
+      "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png",
   });
 }
-// END FIX
 
-function AttendancePage() {
+function PresensiCard() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [coords, setCoords] = useState(null); 
+  const [coords, setCoords] = useState(null);
+  const [image, setImage] = useState(null);
+
+  const webcamRef = useRef(null);
   const navigate = useNavigate();
 
-  // Fungsi untuk mendapatkan header otentikasi JWT
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem("token");
+  const getToken = () => localStorage.getItem("token");
+
+  const getAuthConfig = () => {
+    const token = getToken();
     if (!token) {
       navigate("/login");
       return null;
@@ -44,157 +46,219 @@ function AttendancePage() {
     return {
       headers: {
         Authorization: `Bearer ${token}`,
-      }
+      },
     };
   };
 
-  // Fungsi untuk mendapatkan lokasi pengguna (Geolocation API)
   const getLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setCoords({
-            lat: position.coords.latitude, 
-            lng: position.coords.longitude 
-          });
-          setError(null);
-        },
-        (error) => {
-          let errorMessage = "Gagal mendapatkan lokasi: " + error.message;
-          if (error.code === error.PERMISSION_DENIED) {
-            errorMessage = "Akses lokasi ditolak. Presensi mungkin tidak dapat dilakukan.";
-          }
-          setError(errorMessage);
-        }
-      );
-    } else {
+    if (!navigator.geolocation) {
       setError("Geolocation tidak didukung oleh browser ini.");
+      return;
     }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCoords({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+        setError("");
+      },
+      (err) => {
+        let msg = "Gagal mendapatkan lokasi: " + err.message;
+        if (err.code === err.PERMISSION_DENIED) {
+          msg = "Akses lokasi ditolak. Presensi tidak bisa dilakukan.";
+        }
+        setError(msg);
+      }
+    );
   };
 
-  // Dapatkan lokasi saat komponen dimuat
   useEffect(() => {
-    getLocation(); 
-  }, []); 
+    getLocation();
+  }, []);
+
+  const capture = useCallback(() => {
+    const imageSrc = webcamRef.current?.getScreenshot();
+    if (imageSrc) setImage(imageSrc);
+  }, []);
 
   const handleCheckIn = async () => {
-    setError(""); 
-    setMessage(""); 
-    const config = getAuthHeaders();
+    setError("");
+    setMessage("");
+
+    const config = getAuthConfig();
     if (!config) return;
 
-    if (!coords) {
-      setError("Lokasi belum didapatkan. Mohon izinkan akses lokasi.");
+    if (!coords || !image) {
+      setError("Lokasi dan Foto wajib ada!");
       return;
     }
 
     try {
-      const response = await axios.post('http://localhost:3001/api/presensi/check-in', {
-        latitude: coords.lat, 
-        longitude: coords.lng
-      }, config);
-      setMessage(response.data.message); 
+      const blob = await (await fetch(image)).blob();
+
+      const formData = new FormData();
+      formData.append("latitude", coords.lat);
+      formData.append("longitude", coords.lng);
+      formData.append("buktiFoto", blob, "selfie.jpg");
+
+      const response = await axios.post(
+        "http://localhost:3001/api/presensi/check-in",
+        formData,
+        config
+      );
+
+      setMessage(response.data.message);
+      setImage(null);
     } catch (err) {
       setError(err.response?.data?.message || "Check-In gagal");
     }
   };
 
   const handleCheckOut = async () => {
-    setError(""); 
-    setMessage(""); 
-    const config = getAuthHeaders();
+    setError("");
+    setMessage("");
+
+    const config = getAuthConfig();
     if (!config) return;
-    
+
     try {
-      const response = await axios.post("http://localhost:3001/api/presensi/check-out", {}, config);
-      setMessage(response.data.message); 
+      const response = await axios.post(
+        "http://localhost:3001/api/presensi/check-out",
+        {},
+        config
+      );
+      setMessage(response.data.message);
     } catch (err) {
       setError(err.response?.data?.message || "Check-Out gagal");
     }
   };
 
   return (
-    <div 
-        className="min-h-screen flex items-center justify-center p-4"
-        style={{
-            background: `linear-gradient(135deg, ${COLORS.background} 0%, ${COLORS.secondary} 100%)`, // Gradasi latar belakang
-        }}
+    <div
+      className="flex items-center justify-center px-3 py-3"
+      style={{
+        background: `linear-gradient(135deg, ${COLORS.background} 0%, ${COLORS.secondary} 100%)`,
+        minHeight: "100vh",
+      }}
     >
-      <div 
-        className="p-8 rounded-3xl shadow-2xl w-full max-w-lg text-center backdrop-blur-sm transform transition duration-500 hover:shadow-3xl"
-        style={{ 
-            backgroundColor: COLORS.card,
-            boxShadow: `0 15px 30px ${COLORS.shadow}`, // Shadow ditingkatkan
+      <div
+        className="w-full max-w-md text-center rounded-2xl shadow-xl p-4"
+        style={{
+          backgroundColor: COLORS.card,
+          boxShadow: `0 10px 20px ${COLORS.shadow}`,
         }}
       >
-        <h2 className="text-3xl font-extrabold mb-8" style={{ color: COLORS.primary }}>
+        <h2
+          className="text-xl font-extrabold mb-2"
+          style={{ color: COLORS.primary }}
+        >
           Aktivitas Presensi
         </h2>
 
-        {/* Visualisasi Peta menggunakan React Leaflet */}
         {coords ? (
-            <div className="my-6 border-4 border-dashed rounded-xl overflow-hidden shadow-inner" 
-                 style={{ borderColor: COLORS.secondary }}>
-                <MapContainer 
-                    center={[coords.lat, coords.lng]} 
-                    zoom={15} 
-                    scrollWheelZoom={false} // Disable zoom scroll untuk UX mobile
-                    style={{ height: '300px', width: '100%', borderRadius: '8px' }}
-                >
-                    <TileLayer
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
-                    />
-                    <Marker position={[coords.lat, coords.lng]}>
-                        <Popup>Lokasi Presensi Anda saat ini</Popup>
-                    </Marker>
-                </MapContainer>
-            </div>
+          <div
+            className="w-full border-2 border-dashed rounded-xl overflow-hidden"
+            style={{ borderColor: COLORS.secondary }}
+          >
+            <MapContainer
+              center={[coords.lat, coords.lng]}
+              zoom={15}
+              scrollWheelZoom={false}
+              className="w-full"
+              style={{ height: "22vh", minHeight: "150px" }}
+            >
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <Marker position={[coords.lat, coords.lng]}>
+                <Popup>Lokasi Presensi Anda</Popup>
+              </Marker>
+            </MapContainer>
+          </div>
         ) : (
-            <div className="my-6 p-4 text-center border-2 rounded-lg bg-yellow-50" 
-                 style={{ borderColor: COLORS.secondary, color: COLORS.primary }}>
-                <svg className="w-6 h-6 inline mr-2 animate-spin" fill="none" stroke={COLORS.primary} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 0011.215 1C4.773 10.274 6.708 16 11.215 23"></path>
-                </svg>
-                Memuat lokasi... (Pastikan izin lokasi diberikan)
-            </div>
+          <div
+            className="w-full p-2 rounded-lg bg-yellow-50 border text-sm"
+            style={{ borderColor: COLORS.secondary, color: COLORS.primary }}
+          >
+            Memuat lokasi...
+          </div>
         )}
 
-        {/* Notifikasi */}
-        {message && <p className="text-green-700 bg-green-100 p-3 rounded-lg mb-4 font-medium border-l-4 border-green-500">{message}</p>}
-        {error && <p className="text-red-700 bg-red-100 p-3 rounded-lg mb-4 font-medium border-l-4 border-red-500">{error}</p>}
+        <div className="w-full mt-2 border rounded-xl overflow-hidden bg-black">
+          {image ? (
+            <img
+              src={image}
+              alt="Selfie"
+              className="w-full object-cover"
+              style={{ height: "22vh", minHeight: "150px" }}
+            />
+          ) : (
+            <Webcam
+              audio={false}
+              ref={webcamRef}
+              screenshotFormat="image/jpeg"
+              className="w-full"
+              videoConstraints={{ facingMode: "user" }}
+              style={{ height: "22vh", minHeight: "150px" }}
+            />
+          )}
+        </div>
 
-        {/* Tombol Aksi */}
-        <div className="flex space-x-4 mt-8">
+        <div className="mt-2">
+          {!image ? (
+            <button
+              onClick={capture}
+              className="w-full py-2 rounded-lg text-white font-semibold bg-blue-600 hover:bg-blue-700 transition text-sm"
+            >
+              Ambil Foto 📸
+            </button>
+          ) : (
+            <button
+              onClick={() => setImage(null)}
+              className="w-full py-2 rounded-lg text-white font-semibold bg-gray-600 hover:bg-gray-700 transition text-sm"
+            >
+              Foto Ulang 🔄
+            </button>
+          )}
+        </div>
+
+        {message && (
+          <p className="mt-2 text-green-700 bg-green-100 p-2 rounded-lg text-sm font-medium">
+            {message}
+          </p>
+        )}
+        {error && (
+          <p className="mt-2 text-red-700 bg-red-100 p-2 rounded-lg text-sm font-medium">
+            {error}
+          </p>
+        )}
+
+        <div className="flex gap-2 mt-3">
           <button
             onClick={handleCheckIn}
-            className="flex-1 py-3 px-4 font-bold rounded-xl shadow-lg transition duration-300 transform hover:scale-105"
-            style={{ 
-                backgroundColor: COLORS.checkIn, 
-                color: COLORS.primary,
-                boxShadow: `0 5px 15px ${COLORS.checkIn}66` // Shadow Check-In
+            disabled={!coords}
+            className="flex-1 py-2 rounded-lg font-bold shadow transition hover:scale-[1.02] text-sm"
+            style={{
+              backgroundColor: COLORS.checkIn,
+              color: COLORS.primary,
             }}
-            disabled={!coords} 
           >
             Check-In
           </button>
 
           <button
             onClick={handleCheckOut}
-            className="flex-1 py-3 px-4 font-bold rounded-xl shadow-lg transition duration-300 transform hover:scale-105"
-            style={{ 
-                backgroundColor: COLORS.checkOut, 
-                color: COLORS.primary,
-                boxShadow: `0 5px 15px ${COLORS.checkOut}66` // Shadow Check-Out
+            className="flex-1 py-2 rounded-lg font-bold shadow transition hover:scale-[1.02] text-sm"
+            style={{
+              backgroundColor: COLORS.checkOut,
+              color: COLORS.primary,
             }}
           >
             Check-Out
           </button>
         </div>
-        
       </div>
     </div>
   );
 }
 
-export default AttendancePage;
+export default PresensiCard;
